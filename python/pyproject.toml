@@ -19,8 +19,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://www.feason.com/context"
-Documentation = "https://www.feason.com/context"
+Homepage = "https://www.feason.com/developers"
+Documentation = "https://www.feason.com/developers"
 Repository = "https://github.com/Feason-com/feason-context"
 Issues = "https://github.com/Feason-com/feason-context/issues"
 

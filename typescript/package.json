@@ -20,7 +20,7 @@
   "publishConfig": { "access": "public" },
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/Feason-com/feason-context.git", "directory": "typescript" },
-  "homepage": "https://www.feason.com/context",
+  "homepage": "https://www.feason.com/developers",
   "bugs": { "url": "https://github.com/Feason-com/feason-context/issues" },
   "engines": { "node": ">=20" },
   "devDependencies": {
