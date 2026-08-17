@@ -10,6 +10,8 @@ Feason Context supplies source-grounded Christian research material with exact p
 - `python/` — `feason-context`
 - `openapi/feason-context-openapi.yaml` — the public REST contract
 - `contract.json` — versioned endpoint metadata used to generate both clients
+- `server.json` — official MCP Registry metadata for the hosted remote server
+- `DIRECTORY_LISTING.md` — reusable, boundary-aware MCP directory copy
 
 The hosted service remains at `https://www.feason.com`. These clients do not contain the Feason corpus, production credentials, user data, retrieval engine, or server implementation. Tokens are accepted at runtime and are never persisted.
 
@@ -43,6 +45,12 @@ npm --prefix typescript run build
 npm --prefix typescript test
 python3 -m unittest discover -s python -p 'test_*.py'
 ```
+
+## Distribution
+
+The SDK package names are reserved in their manifests but are not advertised as publicly installable until their registry records are verified. See `PUBLISHING.md` for the release preflight and verification sequence.
+
+The hosted MCP service is described separately by `server.json`. Directory descriptions should preserve Feason's evidence-layer boundaries; see `DIRECTORY_LISTING.md`.
 
 ## Security
 
