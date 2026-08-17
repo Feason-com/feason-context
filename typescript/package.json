@@ -1,0 +1,30 @@
+{
+  "name": "@feason/context",
+  "version": "0.3.0",
+  "description": "Typed, dependency-free client for the Feason Context REST API",
+  "type": "module",
+  "sideEffects": false,
+  "files": ["dist", "README.md", "LICENSE"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "prepack": "npm run build"
+  },
+  "publishConfig": { "access": "public" },
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/Feason-com/feason-context.git", "directory": "typescript" },
+  "homepage": "https://www.feason.com/context",
+  "bugs": { "url": "https://github.com/Feason-com/feason-context/issues" },
+  "engines": { "node": ">=20" },
+  "devDependencies": {
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.0"
+  }
+}

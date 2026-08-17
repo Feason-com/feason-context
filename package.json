@@ -1,0 +1,9 @@
+{
+  "name": "feason-context-workspace",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node scripts/generate-clients.mjs",
+    "generate:check": "node scripts/generate-clients.mjs --check"
+  }
+}

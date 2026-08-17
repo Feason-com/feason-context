@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "feason-context"
+version = "0.3.0"
+description = "Typed, dependency-free client for the Feason Context REST API"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Feason" }]
+keywords = ["MCP", "theology", "research", "citations"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Typing :: Typed"
+]
+
+[project.urls]
+Homepage = "https://www.feason.com/context"
+Documentation = "https://www.feason.com/context"
+Repository = "https://github.com/Feason-com/feason-context"
+Issues = "https://github.com/Feason-com/feason-context/issues"
+
+[tool.setuptools.package-data]
+feason_context = ["py.typed"]

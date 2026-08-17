@@ -1,0 +1,360 @@
+openapi: 3.1.0
+info:
+  title: Feason Context REST API
+  version: 1.2.0
+  description: Source-grounded theological research for clients that cannot use the canonical MCP endpoint.
+servers:
+  - url: https://www.feason.com
+security:
+  - bearerAuth: []
+paths:
+  /api/context/v1/manifest:
+    get:
+      operationId: getCorpusManifest
+      summary: Get the active immutable corpus manifest
+      responses:
+        '200':
+          description: Active corpus counts and verification status distribution.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CorpusManifest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/context/v1/contextualize:
+    post:
+      operationId: contextualize
+      summary: Build an LLM-ready Christian context package
+      description: Returns a token-budgeted evidence block, stable citation labels, and explicit tradition coverage limits. It does not generate a theological verdict.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContextualizeRequest' }
+      responses:
+        '200':
+          description: Prompt-ready context with citation and coverage metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContextPackage' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/context/v1/evaluate-claim:
+    post:
+      operationId: evaluateClaim
+      summary: Evaluate a theological claim against curated passage stances
+      description: Groups retrieved passages as supporting, contradicting, qualifying, contextual, or unclassified. Only explicit curated opposing annotations count as contradiction; silence and missing coverage do not.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EvaluateClaimRequest' }
+      responses:
+        '200':
+          description: Deterministic claim normalization and evidence grouped by curated stance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClaimEvaluation' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/context/v1/search:
+    post:
+      operationId: searchSources
+      summary: Search exact, source-backed theological passages
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SearchRequest' }
+      responses:
+        '200':
+          description: Ranked evidence with source provenance and an opaque next cursor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchResponse' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/context/v1/evidence-packet:
+    post:
+      operationId: buildEvidencePacket
+      summary: Build a multi-category evidence packet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question: { type: string, minLength: 3 }
+                traditions: { type: array, maxItems: 10, items: { type: string } }
+                limit: { type: integer, minimum: 3, maximum: 40, default: 20 }
+      responses:
+        '200':
+          description: Categorized evidence, tradition positions, findings, and provenance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvidencePacket' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/context/v1/verify-citation:
+    post:
+      operationId: verifyCitation
+      summary: Verify a passage or exact quote against an immutable release snapshot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [passageId]
+              properties:
+                passageId: { type: string, minLength: 1, maxLength: 200 }
+                quote: { type: string, minLength: 1, maxLength: 20000 }
+                corpusVersion: { type: string, minLength: 1, maxLength: 200 }
+      responses:
+        '200':
+          description: Exact, normalized, hash-only, or mismatch verification result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CitationVerification' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: OAuth access token or Feason MCP key
+      description: Credential must include the context:read scope.
+  responses:
+    InvalidRequest:
+      description: Request validation failed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing, invalid, or insufficiently scoped bearer credential.
+      headers:
+        WWW-Authenticate: { schema: { type: string } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Per-client request limit exceeded.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        issues:
+          type: array
+          items:
+            type: object
+            properties:
+              path: { type: string }
+              message: { type: string }
+    ContextualizeRequest:
+      type: object
+      required: [query]
+      properties:
+        query: { type: string, minLength: 3, maxLength: 4000 }
+        traditions: { type: array, maxItems: 10, items: { type: string, minLength: 1, maxLength: 100 } }
+        maxTokens: { type: integer, minimum: 512, maximum: 8000, default: 2000 }
+        maxSources: { type: integer, minimum: 3, maximum: 24, default: 12 }
+    ContextCitation:
+      type: object
+      required: [label, passageId, sourceId, sourceTitle, canonicalReference, sourceUrl, traditions, verificationStatus]
+      properties:
+        label: { type: string }
+        passageId: { type: string }
+        sourceId: { type: string }
+        sourceTitle: { type: string }
+        canonicalReference: { type: string }
+        sourceUrl: { type: string, format: uri }
+        traditions: { type: array, items: { type: string } }
+        verificationStatus: { enum: [unverified, machine_checked, curated, scholarly_reviewed] }
+    ContextPackage:
+      type: object
+      required: [query, corpusVersion, context, citations, coverage, usage, instructions]
+      properties:
+        query: { type: string }
+        corpusVersion: { type: string }
+        context: { type: string, description: Token-budgeted Markdown intended to be inserted into a model prompt. }
+        citations: { type: array, items: { $ref: '#/components/schemas/ContextCitation' } }
+        coverage:
+          type: object
+          required: [requestedTraditions, representedTraditions, missingTraditions, caveats]
+          properties:
+            requestedTraditions: { type: array, items: { type: string } }
+            representedTraditions: { type: array, items: { type: string } }
+            missingTraditions: { type: array, items: { type: string } }
+            caveats: { type: array, items: { type: string } }
+        usage:
+          type: object
+          required: [maxTokens, estimatedTokens, includedEvidence, availableEvidence, truncated]
+          properties:
+            maxTokens: { type: integer }
+            estimatedTokens: { type: integer }
+            includedEvidence: { type: integer }
+            availableEvidence: { type: integer }
+            truncated: { type: boolean }
+        instructions: { type: array, items: { type: string } }
+    EvaluateClaimRequest:
+      type: object
+      required: [claim]
+      properties:
+        claim: { type: string, minLength: 3, maxLength: 4000 }
+        limitPerStance: { type: integer, minimum: 1, maximum: 10, default: 5 }
+    ClaimDefinition:
+      type: object
+      required: [label, description]
+      properties:
+        label: { type: string }
+        description: { type: string }
+    ClaimEvaluation:
+      type: object
+      required: [claim, normalizedClaim, claimDefinition, supportingEvidence, contradictingEvidence, qualifyingEvidence, contextualEvidence, unclassifiedEvidence, confidence, methodology, negativeEvidencePolicy, caveats]
+      properties:
+        claim: { type: string }
+        normalizedClaim: { type: [string, 'null'] }
+        claimDefinition:
+          oneOf:
+            - { $ref: '#/components/schemas/ClaimDefinition' }
+            - { type: 'null' }
+        supportingEvidence: { type: array, items: { $ref: '#/components/schemas/EvidenceItem' } }
+        contradictingEvidence: { type: array, items: { $ref: '#/components/schemas/EvidenceItem' } }
+        qualifyingEvidence: { type: array, items: { $ref: '#/components/schemas/EvidenceItem' } }
+        contextualEvidence: { type: array, items: { $ref: '#/components/schemas/EvidenceItem' } }
+        unclassifiedEvidence: { type: array, items: { $ref: '#/components/schemas/EvidenceItem' } }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        methodology: { type: string }
+        negativeEvidencePolicy: { type: string }
+        caveats: { type: array, items: { type: string } }
+    CorpusManifest:
+      type: object
+      required: [corpusVersion, sourceCount, passageCount, entityCount, relationshipCount, traditionPositionCount, claimCount, verificationStatuses]
+      properties:
+        corpusVersion: { type: string }
+        sourceCount: { type: integer }
+        passageCount: { type: integer }
+        entityCount: { type: integer }
+        relationshipCount: { type: integer }
+        traditionPositionCount: { type: integer }
+        claimCount: { type: integer }
+        verificationStatuses:
+          type: object
+          additionalProperties: { type: integer }
+    SourceFilters:
+      type: object
+      properties:
+        sourceTypes:
+          type: array
+          items: { enum: [scripture, creed, council, patristic, historical, confession, lexicon] }
+        traditions: { type: array, items: { type: string } }
+        authors: { type: array, items: { type: string } }
+        dateFrom: { type: integer }
+        dateTo: { type: integer }
+        verificationStatuses:
+          type: array
+          items: { enum: [unverified, machine_checked, curated, scholarly_reviewed] }
+    SearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query: { type: string, minLength: 2 }
+        mode: { enum: [lexical, semantic, hybrid], default: hybrid }
+        filters: { $ref: '#/components/schemas/SourceFilters' }
+        limit: { type: integer, minimum: 1, maximum: 50, default: 10 }
+        cursor: { type: string, description: Opaque nextCursor from a prior response. }
+    EvidenceItem:
+      type: object
+      required: [passageId, sourceId, sourceTitle, sourceType, tradition, canonicalReference, text, confidence, provenance, retrieval]
+      properties:
+        passageId: { type: string }
+        sourceId: { type: string }
+        sourceTitle: { type: string }
+        author: { type: [string, 'null'] }
+        sourceType: { enum: [scripture, creed, council, patristic, historical, confession, lexicon] }
+        tradition: { type: array, items: { type: string } }
+        canonicalReference: { type: string }
+        text: { type: string }
+        relationship: { type: [string, 'null'] }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        provenance:
+          type: object
+          required: [sourceUrl, license, licenseNotes, verificationStatus]
+          properties:
+            sourceUrl: { type: string, format: uri }
+            translation: { type: [string, 'null'] }
+            translator: { type: [string, 'null'] }
+            edition: { type: [string, 'null'] }
+            license: { type: string }
+            licenseNotes: { type: string }
+            verificationStatus: { enum: [unverified, machine_checked, curated, scholarly_reviewed] }
+        retrieval:
+          type: object
+          required: [score, matchedBy]
+          properties:
+            score: { type: number }
+            matchedBy:
+              type: array
+              items: { enum: [lexical, semantic, ontology] }
+    SearchResponse:
+      type: object
+      required: [query, mode, filters, results, retrievalMetadata, page]
+      properties:
+        query: { type: string }
+        mode: { enum: [lexical, semantic, hybrid] }
+        filters: { $ref: '#/components/schemas/SourceFilters' }
+        results: { type: array, items: { $ref: '#/components/schemas/EvidenceItem' } }
+        retrievalMetadata: { type: object, additionalProperties: true }
+        page:
+          type: object
+          required: [limit, offset, nextCursor]
+          properties:
+            limit: { type: integer }
+            offset: { type: integer }
+            nextCursor: { type: [string, 'null'] }
+    EvidencePacket:
+      type: object
+      required: [question, primarySources, scripture, historicalContext, patristicSources, councilSources, interpretivePositions, areasOfConsensus, areasOfDisagreement, sourceProvenance, retrievalMetadata, confidence]
+      properties:
+        question: { type: string }
+        primarySources: { type: array, items: { $ref: '#/components/schemas/EvidenceItem' } }
+        scripture: { type: array, items: { $ref: '#/components/schemas/EvidenceItem' } }
+        historicalContext: { type: array, items: { $ref: '#/components/schemas/EvidenceItem' } }
+        patristicSources: { type: array, items: { $ref: '#/components/schemas/EvidenceItem' } }
+        councilSources: { type: array, items: { $ref: '#/components/schemas/EvidenceItem' } }
+        doctrinalConnections: { type: array, items: { type: object, additionalProperties: true } }
+        interpretivePositions: { type: array, items: { type: object, additionalProperties: true } }
+        areasOfConsensus: { type: array, items: { type: string } }
+        areasOfDisagreement: { type: array, items: { type: string } }
+        relevantTerms: { type: array, items: { type: object, additionalProperties: true } }
+        sourceProvenance: { type: array, items: { type: object, additionalProperties: true } }
+        retrievalMetadata: { type: object, additionalProperties: true }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+    CitationVerification:
+      type: object
+      required: [verified, matchKind, passageId, verificationPolicy]
+      properties:
+        verified: { type: boolean }
+        matchKind: { enum: [passage_hash, exact_quote, normalized_quote, mismatch] }
+        corpusVersion: { type: string }
+        passageId: { type: string }
+        sourceId: { type: string }
+        canonicalReference: { type: string }
+        contentHash: { type: string }
+        quoteOffset: { type: [integer, 'null'] }
+        locator: { type: object, additionalProperties: true }
+        citation: {}
+        reason: { type: string }
+        verificationPolicy: { type: string }

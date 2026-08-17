@@ -1,0 +1,13 @@
+{
+  "contractVersion": "1.2.0",
+  "sdkVersion": "0.3.0",
+  "baseUrl": "https://www.feason.com",
+  "operations": {
+    "manifest": { "method": "GET", "path": "/api/context/v1/manifest" },
+    "contextualize": { "method": "POST", "path": "/api/context/v1/contextualize" },
+    "evaluateClaim": { "method": "POST", "path": "/api/context/v1/evaluate-claim" },
+    "search": { "method": "POST", "path": "/api/context/v1/search" },
+    "evidencePacket": { "method": "POST", "path": "/api/context/v1/evidence-packet" },
+    "verifyCitation": { "method": "POST", "path": "/api/context/v1/verify-citation" }
+  }
+}
