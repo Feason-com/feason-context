@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.feason-com/context",
+  "name": "io.github.Feason-com/context",
   "title": "Feason Context",
   "description": "Christian source evidence for AI agents, with provenance, tradition coverage, and citation checks.",
   "repository": {
