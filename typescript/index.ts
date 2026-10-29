@@ -1,6 +1,12 @@
 import { CONTEXT_DEFAULT_BASE_URL, contextOperations, type ContextOperationName } from './generated.js';
 
 export { CONTEXT_CONTRACT_VERSION, contextOperations } from './generated.js';
+export { FeasonStudyClient } from './study.js';
+export type {
+  FeasonStudyClientOptions, StudyContextClient, StudyInput, StudyResult, StudyCitation,
+  StudyCoverage, TraditionComparison, TraditionPerspective,
+} from './study.js';
+export type { ScriptureProvider, ScriptureRequest, ScripturePassage } from './scripture.js';
 
 export type SearchMode = 'lexical' | 'semantic' | 'hybrid';
 export type SourceType = 'scripture' | 'creed' | 'council' | 'patristic' | 'historical' | 'confession' | 'lexicon';
@@ -10,7 +16,11 @@ export interface FeasonContextClientOptions {
   token: string;
   baseUrl?: string;
   fetch?: typeof globalThis.fetch;
+  /** Per-request deadline, including the response body. Defaults to 20 seconds. */
+  timeoutMs?: number;
 }
+
+export interface FeasonContextRequestOptions { signal?: AbortSignal }
 
 export interface SourceFilters {
   sourceTypes?: SourceType[];
@@ -165,52 +175,119 @@ export interface ClaimEvaluation {
   caveats: string[];
 }
 
+export type ClaimProofStatus = 'corpus_supported' | 'corpus_supported_with_qualifications'
+  | 'corpus_disputed' | 'corpus_opposed' | 'insufficient_evidence';
+
+export interface ClaimProofArtifact {
+  proofId: string;
+  proofVersion: 'feason-claim-proof-v1';
+  generatedAt: string;
+  corpusVersion: string;
+  claim: { submitted: string; normalizedSlug: string | null; label: string | null; description: string | null };
+  graph: { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> };
+  obligations: Array<{ obligationId: string; label: string; passed: boolean; detail: string }>;
+  result: {
+    status: ClaimProofStatus;
+    label: string;
+    explanation: string;
+    confidence: number;
+    evidenceCounts: Record<'supports' | 'opposes' | 'qualifies' | 'contextualizes', number>;
+    representedTraditions: string[];
+  };
+  validation: { valid: boolean; meaning: string; checks: Array<{ checkId: string; label: string; passed: boolean; detail: string }> };
+  methodology: string;
+  caveats: string[];
+  integrity: {
+    scheme: 'sha256-merkle-v1';
+    rootDigest: string;
+    commitmentCount: number;
+    commitments: Array<{ commitmentId: string; digest: string; inclusionPath: Array<{ position: 'left' | 'right'; digest: string }> }>;
+    authenticity: 'unsigned';
+    verifies: string;
+    limitation: string;
+  };
+}
+
 export class FeasonContextClient {
   private readonly baseUrl: string;
   private readonly request: typeof globalThis.fetch;
   private readonly token: string;
+  private readonly timeoutMs: number;
 
   constructor(options: FeasonContextClientOptions) {
     if (!options.token.trim()) throw new TypeError('Feason Context token is required');
     this.token = options.token;
     this.baseUrl = (options.baseUrl ?? CONTEXT_DEFAULT_BASE_URL).replace(/\/$/, '');
     this.request = options.fetch ?? globalThis.fetch;
+    this.timeoutMs = options.timeoutMs ?? 20_000;
+    if (!Number.isInteger(this.timeoutMs) || this.timeoutMs < 1 || this.timeoutMs > 2_147_483_647) {
+      throw new TypeError('timeoutMs must be an integer between 1 and 2147483647');
+    }
   }
 
-  manifest(): Promise<CorpusManifest> {
-    return this.call<CorpusManifest>('manifest');
+  manifest(options?: FeasonContextRequestOptions): Promise<CorpusManifest> {
+    return this.call<CorpusManifest>('manifest', undefined, options);
   }
 
-  contextualize(input: { query: string; traditions?: string[]; maxTokens?: number; maxSources?: number }): Promise<ContextPackage> {
-    return this.call<ContextPackage>('contextualize', input);
+  contextualize(input: { query: string; traditions?: string[]; maxTokens?: number; maxSources?: number }, options?: FeasonContextRequestOptions): Promise<ContextPackage> {
+    return this.call<ContextPackage>('contextualize', input, options);
   }
 
-  evaluateClaim(input: { claim: string; limitPerStance?: number }): Promise<ClaimEvaluation> {
-    return this.call<ClaimEvaluation>('evaluateClaim', input);
+  evaluateClaim(input: { claim: string; limitPerStance?: number }, options?: FeasonContextRequestOptions): Promise<ClaimEvaluation> {
+    return this.call<ClaimEvaluation>('evaluateClaim', input, options);
   }
 
-  search(input: { query: string; mode?: SearchMode; filters?: SourceFilters; limit?: number; cursor?: string }): Promise<SearchResponse> {
-    return this.call<SearchResponse>('search', input);
+  claimProof(input: { claim: string; limitPerStance?: number }, options?: FeasonContextRequestOptions): Promise<ClaimProofArtifact> {
+    return this.call<ClaimProofArtifact>('claimProof', input, options);
   }
 
-  evidencePacket(input: { question: string; traditions?: string[]; limit?: number }): Promise<EvidencePacket> {
-    return this.call<EvidencePacket>('evidencePacket', input);
+  search(input: { query: string; mode?: SearchMode; filters?: SourceFilters; limit?: number; cursor?: string }, options?: FeasonContextRequestOptions): Promise<SearchResponse> {
+    return this.call<SearchResponse>('search', input, options);
   }
 
-  verifyCitation(input: { passageId: string; quote?: string; corpusVersion?: string }): Promise<CitationVerification> {
-    return this.call<CitationVerification>('verifyCitation', input);
+  evidencePacket(input: { question: string; traditions?: string[]; limit?: number }, options?: FeasonContextRequestOptions): Promise<EvidencePacket> {
+    return this.call<EvidencePacket>('evidencePacket', input, options);
   }
 
-  private async call<T>(operationName: ContextOperationName, body?: unknown): Promise<T> {
+  verifyCitation(input: { passageId: string; quote?: string; corpusVersion?: string }, options?: FeasonContextRequestOptions): Promise<CitationVerification> {
+    return this.call<CitationVerification>('verifyCitation', input, options);
+  }
+
+  private async call<T>(operationName: ContextOperationName, body?: unknown, options?: FeasonContextRequestOptions): Promise<T> {
     const operation = contextOperations[operationName];
-    const response = await this.request(`${this.baseUrl}${operation.path}`, {
-      method: operation.method,
-      headers: { authorization: `Bearer ${this.token}`, ...(body ? { 'content-type': 'application/json' } : {}) },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
-    const payload = await response.json() as T;
-    if (!response.ok) throw new FeasonContextError(response.status, payload);
-    return payload;
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(new DOMException('Feason Context request timed out', 'TimeoutError')), this.timeoutMs);
+    const cancel = () => deadline.abort(options?.signal?.reason);
+    options?.signal?.addEventListener('abort', cancel, { once: true });
+    if (options?.signal?.aborted) cancel();
+    const signal = deadline.signal;
+    try {
+      signal.throwIfAborted();
+      const response = await this.request(`${this.baseUrl}${operation.path}`, {
+        method: operation.method,
+        signal,
+        headers: { authorization: `Bearer ${this.token}`, ...(body ? { 'content-type': 'application/json' } : {}) },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch (error) {
+        signal.throwIfAborted();
+        if (!(error instanceof SyntaxError)) throw error;
+        if (response.ok) throw new FeasonContextError(response.status, { error: 'The server returned an invalid JSON response' });
+        payload = { error: 'The server returned a non-JSON error response' };
+      }
+      signal.throwIfAborted();
+      if (!response.ok) throw new FeasonContextError(response.status, payload);
+      if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+        throw new FeasonContextError(response.status, { error: 'The server returned a non-object JSON response' });
+      }
+      return payload as T;
+    } finally {
+      clearTimeout(timer);
+      options?.signal?.removeEventListener('abort', cancel);
+    }
   }
 }
 

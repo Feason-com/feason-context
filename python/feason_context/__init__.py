@@ -105,6 +105,21 @@ class ClaimEvaluation(TypedDict, total=False):
     caveats: list[str]
 
 
+class ClaimProofArtifact(TypedDict, total=False):
+    proofId: str
+    proofVersion: Literal["feason-claim-proof-v1"]
+    generatedAt: str
+    corpusVersion: str
+    claim: dict[str, Any]
+    graph: dict[str, Any]
+    obligations: list[dict[str, Any]]
+    result: dict[str, Any]
+    validation: dict[str, Any]
+    methodology: str
+    caveats: list[str]
+    integrity: dict[str, Any]
+
+
 class FeasonContextError(RuntimeError):
     def __init__(self, status: int, payload: Any):
         super().__init__(f"Feason Context request failed with HTTP {status}")
@@ -138,6 +153,11 @@ class FeasonContextClient:
 
     def evaluate_claim(self, claim: str, limit_per_stance: int = 5) -> ClaimEvaluation:
         return cast(ClaimEvaluation, self._call("evaluateClaim", {
+            "claim": claim, "limitPerStance": limit_per_stance
+        }))
+
+    def claim_proof(self, claim: str, limit_per_stance: int = 4) -> ClaimProofArtifact:
+        return cast(ClaimProofArtifact, self._call("claimProof", {
             "claim": claim, "limitPerStance": limit_per_stance
         }))
 
@@ -183,20 +203,26 @@ class FeasonContextClient:
         request = Request(f"{self.base_url}{operation['path']}", data=data, headers=headers, method=operation["method"])
         try:
             with urlopen(request, timeout=30) as response:
-                parsed = json.loads(response.read().decode("utf-8"))
+                try:
+                    parsed = json.loads(response.read().decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    raise FeasonContextError(response.status, {
+                        "error": "The server returned an invalid JSON response"
+                    }) from None
                 if not isinstance(parsed, dict):
-                    raise FeasonContextError(response.status, parsed)
+                    raise FeasonContextError(response.status, {
+                        "error": "The server returned a non-object JSON response"
+                    })
                 return cast(dict[str, Any], parsed)
         except HTTPError as error:
-            raw = error.read().decode("utf-8")
             try:
-                parsed_error: Any = json.loads(raw)
-            except json.JSONDecodeError:
-                parsed_error = raw
+                parsed_error: Any = json.loads(error.read().decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                parsed_error = {"error": "The server returned a non-JSON error response"}
             raise FeasonContextError(error.code, parsed_error) from error
 
 
 __all__ = [
-    "CitationVerification", "ClaimEvaluation", "ContextPackage", "CorpusManifest", "EvidenceItem", "EvidencePacket",
+    "CitationVerification", "ClaimEvaluation", "ClaimProofArtifact", "ContextPackage", "CorpusManifest", "EvidenceItem", "EvidencePacket",
     "FeasonContextClient", "FeasonContextError", "SearchMode", "SearchResponse",
 ]
