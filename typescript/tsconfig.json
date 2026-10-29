@@ -10,6 +10,6 @@
     "rootDir": ".",
     "skipLibCheck": true
   },
-  "include": ["index.ts", "generated.ts"],
-  "exclude": ["index.test.ts"]
+  "include": ["index.ts", "generated.ts", "study.ts", "scripture.ts"],
+  "exclude": ["*.test.ts"]
 }

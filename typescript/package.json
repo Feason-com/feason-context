@@ -1,14 +1,26 @@
 {
   "name": "@feason/context",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Typed, dependency-free client for the Feason Context REST API",
   "type": "module",
   "sideEffects": false,
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./study": {
+      "types": "./dist/study.d.ts",
+      "import": "./dist/study.js"
+    },
+    "./scripture": {
+      "types": "./dist/scripture.d.ts",
+      "import": "./dist/scripture.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -17,12 +29,22 @@
     "test": "vitest run",
     "prepack": "npm run build"
   },
-  "publishConfig": { "access": "public" },
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/Feason-com/feason-context.git", "directory": "typescript" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Feason-com/feason-context.git",
+    "directory": "typescript"
+  },
   "homepage": "https://www.feason.com/developers",
-  "bugs": { "url": "https://github.com/Feason-com/feason-context/issues" },
-  "engines": { "node": ">=20" },
+  "bugs": {
+    "url": "https://github.com/Feason-com/feason-context/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "devDependencies": {
     "typescript": "^6.0.2",
     "vitest": "^4.1.0"

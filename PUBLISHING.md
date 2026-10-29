@@ -1,6 +1,6 @@
 # Package publishing runbook
 
-The TypeScript and Python SDKs are both version `0.3.0`. As of 2026-08-17, neither package name resolves in its public registry, so installation examples must not claim they are available until publication is verified.
+The TypeScript and Python SDK source manifests both target version `0.4.0`. This source update does not publish either package. Registry availability has not been verified in this audit; installation examples must not claim a public release until publication is independently verified.
 
 ## Preflight
 
@@ -28,7 +28,7 @@ Authenticate as an npm account permitted to publish the `@feason` scope, then ru
 Verify independently:
 
 ```sh
-npm view @feason/context@0.3.0 version dist.integrity repository.url
+npm view @feason/context@0.4.0 version dist.integrity repository.url
 ```
 
 ## Publish Python

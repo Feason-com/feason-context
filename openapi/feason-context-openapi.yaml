@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Feason Context REST API
-  version: 1.2.0
-  description: Source-grounded theological research for clients that cannot use the canonical MCP endpoint.
+  version: 1.4.0
+  description: Source-grounded theological research plus public Signed Proof V2 publishing, verification, key discovery, and transparency receipts.
 servers:
   - url: https://www.feason.com
 security:
@@ -58,6 +58,98 @@ paths:
         '400': { $ref: '#/components/responses/InvalidRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '429': { $ref: '#/components/responses/RateLimited' }
+  /api/context/v1/claim-proof:
+    post:
+      operationId: buildClaimProof
+      summary: Build a proof-carrying theological claim evaluation
+      description: Builds a deterministic evidence graph with disclosed inference rules, explicit abstention, validation checks, and an unsigned SHA-256 Merkle commitment. The result is bounded to represented corpus evidence and is not a universal theological verdict.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClaimProofRequest' }
+      responses:
+        '200':
+          description: Proof graph, bounded result, validation checks, and Merkle integrity commitments.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClaimProofArtifact' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/proof/publish:
+    post:
+      operationId: publishSignedClaimProof
+      summary: Publish a canonical Ed25519-signed claim proof
+      description: Accepts only claims that map to the curated registry. The server rebuilds from canonical registry wording, signs the complete artifact, and appends an immutable public transparency entry. Arbitrary submitted wording is not persisted.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClaimProofRequest' }
+      responses:
+        '200': { description: Existing canonical signed proof and a current receipt, content: { application/json: { schema: { $ref: '#/components/schemas/SignedProofRecord' } } } }
+        '201': { description: Newly appended canonical signed proof and receipt, content: { application/json: { schema: { $ref: '#/components/schemas/SignedProofRecord' } } } }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '422': { description: Claim does not map to the curated public registry. }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { description: Issuer signing or transparency storage is not configured. }
+  /api/proof/verify:
+    post:
+      operationId: verifySignedClaimProof
+      summary: Verify a Signed Proof V2 envelope and optional log receipt
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignedProofVerificationRequest' }
+      responses:
+        '200': { description: Layered artifact, issuer, and transparency verification result. }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '413': { description: Artifact exceeds the 2 MB verifier limit. }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/proof/records/{proofId}:
+    get:
+      operationId: getPublishedSignedProof
+      summary: Get a public signed proof and current inclusion receipt
+      security: []
+      parameters:
+        - in: path
+          name: proofId
+          required: true
+          schema: { type: string, pattern: '^proof_[a-f0-9]{20}$' }
+      responses:
+        '200': { description: Signed canonical proof record, content: { application/json: { schema: { $ref: '#/components/schemas/SignedProofRecord' } } } }
+        '404': { description: Proof not found. }
+        '503': { description: Transparency storage is unavailable. }
+  /api/proof/transparency:
+    get:
+      operationId: getProofTransparencyCheckpoint
+      summary: Get the current public proof-log Merkle checkpoint
+      security: []
+      responses:
+        '200': { description: Current tree size, Merkle root, observation time, and recent safe metadata. }
+        '503': { description: Transparency storage is unavailable. }
+  /.well-known/feason-proof-keys.json:
+    get:
+      operationId: getFeasonProofSigningKeys
+      summary: Get active and retained Feason Proof Ed25519 public keys
+      security: []
+      responses:
+        '200':
+          description: Feason Proof issuer trust registry.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [issuer, purpose, keys]
+                properties:
+                  issuer: { const: 'https://www.feason.com' }
+                  purpose: { type: string }
+                  keys: { type: array, items: { $ref: '#/components/schemas/ProofSigningKey' } }
+        '503': { description: Key registry is misconfigured. }
   /api/context/v1/search:
     post:
       operationId: searchSources
@@ -239,6 +331,143 @@ components:
         methodology: { type: string }
         negativeEvidencePolicy: { type: string }
         caveats: { type: array, items: { type: string } }
+    ClaimProofRequest:
+      type: object
+      required: [claim]
+      properties:
+        claim: { type: string, minLength: 3, maxLength: 4000 }
+        limitPerStance: { type: integer, minimum: 1, maximum: 6, default: 4 }
+    ClaimProofArtifact:
+      type: object
+      required: [proofId, proofVersion, generatedAt, corpusVersion, claim, graph, obligations, result, validation, methodology, caveats, integrity]
+      properties:
+        proofId: { type: string, pattern: '^proof_[a-f0-9]{20}$' }
+        proofVersion: { const: feason-claim-proof-v1 }
+        generatedAt: { type: string, format: date-time }
+        corpusVersion: { type: string }
+        claim:
+          type: object
+          required: [submitted, normalizedSlug, label, description]
+          properties:
+            submitted: { type: string }
+            normalizedSlug: { type: [string, 'null'] }
+            label: { type: [string, 'null'] }
+            description: { type: [string, 'null'] }
+        graph:
+          type: object
+          required: [nodes, edges]
+          properties:
+            nodes: { type: array, items: { type: object, additionalProperties: true } }
+            edges: { type: array, items: { type: object, additionalProperties: true } }
+        obligations:
+          type: array
+          items:
+            type: object
+            required: [obligationId, label, passed, detail]
+            properties:
+              obligationId: { type: string }
+              label: { type: string }
+              passed: { type: boolean }
+              detail: { type: string }
+        result:
+          type: object
+          required: [status, label, explanation, confidence, evidenceCounts, representedTraditions]
+          properties:
+            status: { enum: [corpus_supported, corpus_supported_with_qualifications, corpus_disputed, corpus_opposed, insufficient_evidence] }
+            label: { type: string }
+            explanation: { type: string }
+            confidence: { type: number, minimum: 0, maximum: 1 }
+            evidenceCounts: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+            representedTraditions: { type: array, items: { type: string } }
+        validation:
+          type: object
+          required: [valid, meaning, checks]
+          properties:
+            valid: { type: boolean }
+            meaning: { type: string }
+            checks: { type: array, items: { type: object, additionalProperties: true } }
+        methodology: { type: string }
+        caveats: { type: array, items: { type: string } }
+        integrity:
+          type: object
+          required: [scheme, rootDigest, commitmentCount, commitments, authenticity, verifies, limitation]
+          properties:
+            scheme: { const: sha256-merkle-v1 }
+            rootDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+            commitmentCount: { type: integer, minimum: 1 }
+            commitments: { type: array, items: { type: object, additionalProperties: true } }
+            authenticity: { const: unsigned }
+            verifies: { type: string }
+            limitation: { type: string }
+    ProofPublicKeyJwk:
+      type: object
+      required: [kty, crv, x]
+      properties:
+        kty: { const: OKP }
+        crv: { const: Ed25519 }
+        x: { type: string, pattern: '^[a-zA-Z0-9_-]+$' }
+    ProofSigningKey:
+      type: object
+      required: [keyId, algorithm, status, publicKeyJwk]
+      properties:
+        keyId: { type: string }
+        algorithm: { const: Ed25519 }
+        status: { enum: [active, retired] }
+        publicKeyJwk: { $ref: '#/components/schemas/ProofPublicKeyJwk' }
+    SignedClaimProofEnvelope:
+      type: object
+      required: [envelopeVersion, proofId, artifact, signature]
+      properties:
+        envelopeVersion: { const: feason-signed-claim-proof-v2 }
+        proofId: { type: string, pattern: '^proof_[a-f0-9]{20}$' }
+        artifact: { $ref: '#/components/schemas/ClaimProofArtifact' }
+        signature:
+          type: object
+          required: [algorithm, keyId, signedAt, artifactDigest, value, publicKeyJwk]
+          properties:
+            algorithm: { const: Ed25519 }
+            keyId: { type: string }
+            signedAt: { type: string, format: date-time }
+            artifactDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+            value: { type: string, pattern: '^[a-zA-Z0-9_-]+$' }
+            publicKeyJwk: { $ref: '#/components/schemas/ProofPublicKeyJwk' }
+    ProofTransparencyReceipt:
+      type: object
+      required: [logVersion, sequence, leafIndex, treeSize, leafDigest, rootDigest, inclusionPath, observedAt]
+      properties:
+        logVersion: { const: feason-proof-transparency-log-v1 }
+        sequence: { type: integer, minimum: 1 }
+        leafIndex: { type: integer, minimum: 0 }
+        treeSize: { type: integer, minimum: 1 }
+        leafDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+        rootDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+        inclusionPath:
+          type: array
+          items:
+            type: object
+            required: [position, digest]
+            properties:
+              position: { enum: [left, right] }
+              digest: { type: string, pattern: '^[a-f0-9]{64}$' }
+        observedAt: { type: string, format: date-time }
+    SignedProofRecord:
+      type: object
+      required: [envelope, receipt]
+      properties:
+        envelope: { $ref: '#/components/schemas/SignedClaimProofEnvelope' }
+        receipt: { $ref: '#/components/schemas/ProofTransparencyReceipt' }
+        publicUrl: { type: string, format: uri }
+        created: { type: boolean }
+        sequence: { type: integer, minimum: 1 }
+        publishedAt: { type: string, format: date-time }
+    SignedProofVerificationRequest:
+      oneOf:
+        - { $ref: '#/components/schemas/SignedClaimProofEnvelope' }
+        - type: object
+          required: [envelope]
+          properties:
+            envelope: { $ref: '#/components/schemas/SignedClaimProofEnvelope' }
+            receipt: { $ref: '#/components/schemas/ProofTransparencyReceipt' }
     CorpusManifest:
       type: object
       required: [corpusVersion, sourceCount, passageCount, entityCount, relationshipCount, traditionPositionCount, claimCount, verificationStatuses]
