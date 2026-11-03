@@ -61,3 +61,7 @@ socket timeout and are not retried automatically.
 Tokens are never persisted or logged by the client. The package includes the
 PEP 561 marker for inline types. Matching a quotation does not establish doctrine,
 complete source coverage, or permission to redistribute the source text.
+
+Authenticated requests do not follow HTTP redirects (including same-origin redirects).
+Configure the final HTTPS API base URL directly; a redirect raises `FeasonContextError`
+with its HTTP status instead of forwarding the bearer credential.

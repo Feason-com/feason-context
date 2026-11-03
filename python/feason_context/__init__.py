@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Literal, TypedDict, cast
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from ._generated import CONTEXT_DEFAULT_BASE_URL, OPERATIONS
 
@@ -127,6 +127,17 @@ class FeasonContextError(RuntimeError):
         self.payload = payload
 
 
+class _RejectRedirects(HTTPRedirectHandler):
+    """Never replay an authenticated request at a redirect destination."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+# A private opener also avoids inheriting a process-wide redirect policy.
+_authenticated_opener = build_opener(_RejectRedirects())
+
+
 class FeasonContextClient:
     def __init__(self, token: str, base_url: str = CONTEXT_DEFAULT_BASE_URL):
         if not token.strip():
@@ -202,7 +213,7 @@ class FeasonContextClient:
             headers["Content-Type"] = "application/json"
         request = Request(f"{self.base_url}{operation['path']}", data=data, headers=headers, method=operation["method"])
         try:
-            with urlopen(request, timeout=30) as response:
+            with _authenticated_opener.open(request, timeout=30) as response:
                 try:
                     parsed = json.loads(response.read().decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError):
