@@ -1,10 +1,12 @@
+import { FeasonContextError, MAX_CITATION_VERIFICATION_BATCH } from './transport.js';
 import type {
-  CitationVerification, EvidenceItem, EvidencePacket, FeasonContextClient,
+  CitationVerification, CitationVerificationInput, EvidenceItem, EvidencePacket, FeasonContextClient,
   FeasonContextRequestOptions, TraditionPosition,
 } from './index.js';
 import type { ScripturePassage, ScriptureProvider, ScriptureRequest } from './scripture.js';
 
-export type StudyContextClient = Pick<FeasonContextClient, 'evidencePacket' | 'verifyCitation'>;
+export type StudyContextClient = Pick<FeasonContextClient, 'evidencePacket' | 'verifyCitation'>
+  & Partial<Pick<FeasonContextClient, 'verifyCitationsBatch'>>;
 
 export interface FeasonStudyClientOptions {
   context: StudyContextClient;
@@ -100,32 +102,9 @@ export class FeasonStudyClient {
     const packet = await this.context.evidencePacket({ question, limit }, options);
     const evidence = collectEvidence(packet);
     const requested = input.verifyCitations !== false;
-    const citations = await mapBounded(evidence, this.concurrency, async (item): Promise<StudyCitation> => {
-      options.signal?.throwIfAborted();
-      if (!requested) return { evidence: item, status: 'not_requested', verification: null };
-      try {
-        const verification = await this.context.verifyCitation({
-          passageId: item.passageId, quote: item.text, corpusVersion: packet.retrievalMetadata.corpusVersion,
-        }, options);
-        options.signal?.throwIfAborted();
-        const verified = verification.verified === true
-          && verification.passageId === item.passageId
-          && verification.sourceId === item.sourceId
-          && verification.corpusVersion === packet.retrievalMetadata.corpusVersion
-          && ['exact_quote', 'normalized_quote'].includes(verification.matchKind);
-        return {
-          evidence: item, status: verified ? 'verified' : 'not_verified', verification,
-          ...(!verified ? { reason: 'quote_or_identity_mismatch' as const } : {}),
-        };
-      } catch (error) {
-        options.signal?.throwIfAborted();
-        // Authentication/authorization/rate-limit failures stop the workflow;
-        // continuing would fan out requests that cannot succeed.
-        // Other verification failures remain explicit, never repaired.
-        if (error instanceof Error && 'status' in error && [401, 403, 429].includes(Number(error.status))) throw error;
-        return { evidence: item, status: 'unavailable', verification: null, reason: 'verification_unavailable' };
-      }
-    });
+    const citations: StudyCitation[] = !requested
+      ? evidence.map((item) => ({ evidence: item, status: 'not_requested', verification: null }))
+      : await this.verifyEvidence(evidence, packet.retrievalMetadata.corpusVersion, options);
     options.signal?.throwIfAborted();
     const counts: StudyResult['verification']['counts'] = { verified: 0, not_verified: 0, unavailable: 0, not_requested: 0 };
     for (const citation of citations) counts[citation.status] += 1;
@@ -143,6 +122,48 @@ export class FeasonStudyClient {
         ...(!evidence.length ? ['No passage evidence was returned; no conclusion can be drawn from this packet.'] : []),
       ],
     };
+  }
+
+  private async verifyEvidence(evidence: EvidenceItem[], corpusVersion: string, options: FeasonContextRequestOptions): Promise<StudyCitation[]> {
+    const inputFor = (item: EvidenceItem): CitationVerificationInput => ({
+      passageId: item.passageId, quote: item.text, corpusVersion,
+    });
+    const verifyIndividually = (items: EvidenceItem[]) => mapBounded(items, this.concurrency, async (item) => {
+      options.signal?.throwIfAborted();
+      try {
+        const result = await this.context.verifyCitation(inputFor(item), options);
+        options.signal?.throwIfAborted();
+        return classifyCitation(item, result, corpusVersion);
+      } catch (error) {
+        options.signal?.throwIfAborted();
+        if (isVerificationBlockingError(error)) throw error;
+        return unavailableCitation(item);
+      }
+    });
+    if (!this.context.verifyCitationsBatch || evidence.length < 2) return verifyIndividually(evidence);
+
+    // Sequential batches limit work in flight under the shared, per-citation quota.
+    // The same caller signal covers retrieval, every batch, and any legacy fallback.
+    const verified: StudyCitation[] = [];
+    for (let start = 0; start < evidence.length; start += MAX_CITATION_VERIFICATION_BATCH) {
+      options.signal?.throwIfAborted();
+      const chunk = evidence.slice(start, start + MAX_CITATION_VERIFICATION_BATCH);
+      try {
+        const batch = await this.context.verifyCitationsBatch({ citations: chunk.map(inputFor) }, options);
+        options.signal?.throwIfAborted();
+        verified.push(...chunk.map((item, index) => classifyCitation(item, batch.results[index]!, corpusVersion)));
+      } catch (error) {
+        options.signal?.throwIfAborted();
+        // Only the old Feason router's exact response denotes an absent operation.
+        // Do not convert proxy, auth, rate limit, or network errors into N requests.
+        if (isUnsupportedBatchOperation(error)) {
+          return [...verified, ...await verifyIndividually(evidence.slice(start))];
+        }
+        if (isVerificationBlockingError(error)) throw error;
+        verified.push(...chunk.map(unavailableCitation));
+      }
+    }
+    return verified;
   }
 
   async compareTraditions(
@@ -179,6 +200,31 @@ export class FeasonStudyClient {
     }
     return passage;
   }
+}
+
+function classifyCitation(item: EvidenceItem, verification: CitationVerification, corpusVersion: string): StudyCitation {
+  const verified = verification.verified === true
+    && verification.passageId === item.passageId
+    && verification.sourceId === item.sourceId
+    && verification.corpusVersion === corpusVersion
+    && ['exact_quote', 'normalized_quote'].includes(verification.matchKind);
+  return { evidence: item, status: verified ? 'verified' : 'not_verified', verification,
+    ...(!verified ? { reason: 'quote_or_identity_mismatch' as const } : {}) };
+}
+
+function unavailableCitation(item: EvidenceItem): StudyCitation {
+  return { evidence: item, status: 'unavailable', verification: null, reason: 'verification_unavailable' };
+}
+
+function isVerificationBlockingError(error: unknown): boolean {
+  return error instanceof Error && 'status' in error && [401, 403, 429].includes(Number(error.status));
+}
+
+function isUnsupportedBatchOperation(error: unknown): boolean {
+  if (!(error instanceof FeasonContextError) || error.status !== 404) return false;
+  const { payload } = error;
+  return payload !== null && typeof payload === 'object' && !Array.isArray(payload)
+    && Object.keys(payload).length === 1 && 'error' in payload && payload.error === 'Unknown context operation';
 }
 
 function collectEvidence(packet: EvidencePacket): EvidenceItem[] {

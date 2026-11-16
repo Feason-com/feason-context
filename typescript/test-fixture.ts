@@ -54,15 +54,22 @@ export function createFixtureContext(): FeasonContextClient {
           !input.traditions?.length || input.traditions.includes(position.tradition));
         return Response.json({ ...packet, question: input.question, interpretivePositions });
       }
-      if (path === '/api/context/v1/verify-citation') {
-        const input = JSON.parse(String(init?.body)) as { passageId: string; quote: string; corpusVersion: string };
+      type FixtureCitation = { passageId: string; quote: string; corpusVersion: string };
+      const verify = (input: FixtureCitation) => {
         const item = packet.primarySources.find((source) => source.passageId === input.passageId);
         const verified = !!item && item.text === input.quote && input.corpusVersion === packet.retrievalMetadata.corpusVersion;
-        return Response.json({
+        return {
           verified, matchKind: verified ? 'exact_quote' : 'mismatch', passageId: input.passageId,
           sourceId: item?.sourceId, corpusVersion: packet.retrievalMetadata.corpusVersion,
           verificationPolicy: 'Synthetic fixture equality only; not production citation verification.',
-        });
+        };
+      };
+      if (path === '/api/context/v1/verify-citation') {
+        return Response.json(verify(JSON.parse(String(init?.body)) as FixtureCitation));
+      }
+      if (path === '/api/context/v1/verify-citations-batch') {
+        const input = JSON.parse(String(init?.body)) as { citations: FixtureCitation[] };
+        return Response.json({ results: input.citations.map(verify) });
       }
       return Response.json({ error: 'Unknown fixture operation' }, { status: 404 });
     },
