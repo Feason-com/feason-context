@@ -213,6 +213,8 @@ class FeasonContextClient:
         if not isinstance(results, list) or len(results) != len(citations) or not all(
             isinstance(item, dict) and isinstance(item.get("verified"), bool)
             and item.get("passageId") == citation["passageId"]
+            and item.get("matchKind") in ("passage_hash", "exact_quote", "normalized_quote", "mismatch")
+            and isinstance(item.get("verificationPolicy"), str)
             for item, citation in zip(results, citations)
         ):
             raise FeasonContextError(200, {"error": "The server returned invalid citation batch results"})

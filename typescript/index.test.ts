@@ -39,9 +39,22 @@ describe('Feason Context TypeScript SDK', () => {
     expect(request).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    { verified: true, passageId: 'a', verificationPolicy: 'Synthetic' },
+    { verified: true, passageId: 'a', matchKind: 'exact_quote' },
+    { verified: true, passageId: 'a', matchKind: 'unexpected', verificationPolicy: 'Synthetic' },
+    { verified: true, passageId: 'a', matchKind: 'exact_quote', verificationPolicy: false },
+  ])('rejects an incomplete or invalid batch verification item: %j', async (item) => {
+    const client = new FeasonContextClient({ token: 'synthetic', fetch: async () => Response.json({ results: [item] }) });
+    await expect(client.verifyCitationsBatch({ citations: [{ passageId: 'a' }] }))
+      .rejects.toMatchObject({ status: 200 });
+  });
+
   it('rejects results ordered differently from their requests', async () => {
     const client = new FeasonContextClient({ token: 'synthetic', fetch: async () => Response.json({
-      results: [{ passageId: 'b', verified: true }, { passageId: 'a', verified: true }],
+      results: ['b', 'a'].map((passageId) => ({
+        passageId, verified: true, matchKind: 'exact_quote', verificationPolicy: 'Synthetic',
+      })),
     }) });
     await expect(client.verifyCitationsBatch({ citations: [{ passageId: 'a' }, { passageId: 'b' }] }))
       .rejects.toMatchObject({ status: 200 });

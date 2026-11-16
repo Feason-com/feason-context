@@ -70,8 +70,8 @@ class ClientTest(unittest.TestCase):
             {"passageId": "fixture-b"},
         ]
         results = [
-            {"passageId": "fixture-a", "verified": True, "matchKind": "exact_quote"},
-            {"passageId": "fixture-b", "verified": False, "matchKind": "mismatch"},
+            {"passageId": "fixture-a", "verified": True, "matchKind": "exact_quote", "verificationPolicy": "Synthetic"},
+            {"passageId": "fixture-b", "verified": False, "matchKind": "mismatch", "verificationPolicy": "Synthetic"},
         ]
         with patch("feason_context.urlopen", return_value=FakeResponse(json.dumps({"results": results}).encode())) as request:
             client = FeasonContextClient("token", "https://example.test/")
@@ -94,11 +94,29 @@ class ClientTest(unittest.TestCase):
             request.assert_called_once()
 
     def test_verify_citations_batch_rejects_reordered_results(self):
-        body = b'{"results":[{"passageId":"b","verified":true},{"passageId":"a","verified":true}]}'
+        body = json.dumps({"results": [
+            {"passageId": passage_id, "verified": True, "matchKind": "exact_quote", "verificationPolicy": "Synthetic"}
+            for passage_id in ("b", "a")
+        ]}).encode()
         with patch("feason_context.urlopen", return_value=FakeResponse(body)):
             with self.assertRaises(FeasonContextError) as raised:
                 FeasonContextClient("token").verify_citations_batch([{"passageId": "a"}, {"passageId": "b"}])
             self.assertEqual(raised.exception.status, 200)
+
+    def test_verify_citations_batch_rejects_invalid_result_items(self):
+        for item in (
+            {"verificationPolicy": "Synthetic"},
+            {"matchKind": "exact_quote"},
+            {"matchKind": "unexpected", "verificationPolicy": "Synthetic"},
+            {"matchKind": "exact_quote", "verificationPolicy": False},
+        ):
+            with self.subTest(item=item):
+                result = {"passageId": "a", "verified": True, **item}
+                body = json.dumps({"results": [result]}).encode()
+                with patch("feason_context.urlopen", return_value=FakeResponse(body)):
+                    with self.assertRaises(FeasonContextError) as raised:
+                        FeasonContextClient("token").verify_citations_batch([{"passageId": "a"}])
+                    self.assertEqual(raised.exception.status, 200)
 
     def test_verify_citations_batch_does_not_retry_old_route(self):
         error = HTTPError("https://example.test", 404, "Not Found", {},

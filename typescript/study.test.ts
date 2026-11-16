@@ -134,6 +134,25 @@ describe('Feason study workflows', () => {
       expect(result.verification.allVerified).toBe(true);
     });
 
+    it('propagates a caller timeout across retrieval, the current batch and remaining work', async () => {
+      const context = batchContext(12);
+      const signal = AbortSignal.timeout(50);
+      context.verifyCitationsBatch.mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+        signal.throwIfAborted();
+        throw new Error('Expected caller deadline');
+      });
+      await expect(new FeasonStudyClient({ context }).study({ question: 'Fixture sources' }, { signal }))
+        .rejects.toMatchObject({ name: 'TimeoutError' });
+      expect(context.evidencePacket).toHaveBeenCalledWith(expect.anything(), { signal });
+      expect(context.verifyCitationsBatch).toHaveBeenCalledWith(expect.anything(), { signal });
+      expect(context.verifyCitationsBatch).toHaveBeenCalledOnce();
+      expect(context.verifyCitation).not.toHaveBeenCalled();
+    });
+
     it('honors an end-to-end abort before fallback or a later chunk starts', async () => {
       const context = batchContext(12);
       const controller = new AbortController();

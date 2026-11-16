@@ -274,7 +274,9 @@ export class FeasonContextClient {
     const payload = await this.call<BatchCitationVerification>('verifyCitationsBatch', input, options);
     if (!Array.isArray(payload.results) || payload.results.length !== count || !payload.results.every((item, index) =>
       item !== null && typeof item === 'object' && !Array.isArray(item)
-      && typeof item.verified === 'boolean' && item.passageId === input.citations[index]!.passageId)) {
+      && typeof item.verified === 'boolean' && item.passageId === input.citations[index]!.passageId
+      && ['passage_hash', 'exact_quote', 'normalized_quote', 'mismatch'].includes(item.matchKind)
+      && typeof item.verificationPolicy === 'string')) {
       throw new FeasonContextError(200, { error: 'The server returned invalid citation batch results' });
     }
     return payload;

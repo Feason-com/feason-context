@@ -123,7 +123,7 @@ Cancellation propagates rather than becoming an unavailable citation. HTTP 401,
 requests settle first. Other individual verification failures are marked
 `unavailable`, without copying exception messages into the result. Retrieval
 failures reject the study. Per-request deadlines include reading the body;
-provide an overall `AbortSignal` to bound the complete workflow. A custom
+provide an overall signal such as `AbortSignal.timeout(60_000)` to bound retrieval, all batches, and any legacy fallback. A custom
 injected client or fetch implementation must honor the supplied signal.
 
 Matching a quotation does not establish doctrinal truth, scholarly review,
