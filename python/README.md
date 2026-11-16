@@ -43,11 +43,16 @@ else:
 | `search(query, ...)` | Retrieve filtered, paginated source passages |
 | `evidence_packet(question, ...)` | Retrieve grouped sources, positions, and caveats |
 | `verify_citation(passage_id, ...)` | Check a quote or passage hash against a corpus release |
+| `verify_citations_batch(citations)` | Check one to ten requests and receive ordered results |
 
 See [integration recipes](../USE_CASES.md) for search pagination, research
 notebooks, study assistants, claim review, and release-pinned quotation checks.
 TypeScript additionally has composed study and tradition-comparison helpers;
-the Python client exposes the seven underlying REST operations.
+the Python client exposes the eight underlying REST operations. Batch entries
+use the API keys `passageId`, optional `quote`, and optional `corpusVersion`.
+The batch method returns a `results` list in input order and counts each input
+toward the single-citation quota. It does not retry or automatically check
+each item against older hosts; use `verify_citation` for those hosts.
 
 ## Failure handling
 
@@ -55,6 +60,8 @@ the Python client exposes the seven underlying REST operations.
 JSON errors and uses a generic message for non-JSON bodies. Malformed JSON and
 non-object successful responses also raise this error, with their original 2xx
 status. The client checks the top-level response object, not every response field.
+Batch responses additionally check that each request has a result of the
+expected basic shape.
 Network failures keep their transport exception type. Calls use a 30-second
 socket timeout and are not retried automatically.
 

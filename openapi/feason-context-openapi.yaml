@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Feason Context REST API
-  version: 1.4.0
+  version: 1.5.0
   description: Source-grounded theological research plus public Signed Proof V2 publishing, verification, key discovery, and transparency receipts.
 servers:
   - url: https://www.feason.com
@@ -201,18 +201,48 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [passageId]
-              properties:
-                passageId: { type: string, minLength: 1, maxLength: 200 }
-                quote: { type: string, minLength: 1, maxLength: 20000 }
-                corpusVersion: { type: string, minLength: 1, maxLength: 200 }
+              $ref: '#/components/schemas/CitationVerificationInput'
       responses:
         '200':
           description: Exact, normalized, hash-only, or mismatch verification result.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CitationVerification' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/context/v1/verify-citations-batch:
+    post:
+      operationId: verifyCitationsBatch
+      summary: Verify up to ten passages or exact quotes in input order
+      description: Shares the single verification quota; each requested citation counts as one verification.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [citations]
+              properties:
+                citations:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items: { $ref: '#/components/schemas/CitationVerificationInput' }
+      responses:
+        '200':
+          description: One verification result per input citation, in the same order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    minItems: 1
+                    maxItems: 10
+                    items: { $ref: '#/components/schemas/CitationVerification' }
         '400': { $ref: '#/components/responses/InvalidRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '429': { $ref: '#/components/responses/RateLimited' }
@@ -571,6 +601,13 @@ components:
         sourceProvenance: { type: array, items: { type: object, additionalProperties: true } }
         retrievalMetadata: { type: object, additionalProperties: true }
         confidence: { type: number, minimum: 0, maximum: 1 }
+    CitationVerificationInput:
+      type: object
+      required: [passageId]
+      properties:
+        passageId: { type: string, minLength: 1, maxLength: 200 }
+        quote: { type: string, minLength: 1, maxLength: 20000 }
+        corpusVersion: { type: string, minLength: 1, maxLength: 200 }
     CitationVerification:
       type: object
       required: [verified, matchKind, passageId, verificationPolicy]

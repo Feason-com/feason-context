@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  FeasonContextError, FeasonStudyClient, type CitationVerification,
+  FeasonContextClient, FeasonContextError, FeasonStudyClient, type CitationVerification, type CitationVerificationInput,
   type EvidencePacket, type ScripturePassage,
 } from './index';
 import { createFixtureContext, fixtureEvidence, fixturePacket } from './test-fixture';
@@ -48,6 +48,124 @@ describe('Feason study workflows', () => {
     expect(context.verifyCitation).toHaveBeenCalledWith({
       passageId: 'a', quote: packet.primarySources[0]!.text, corpusVersion: 'synthetic-demo-v1',
     }, {});
+  });
+
+  describe('optional verification batches', () => {
+    function batchContext(count: number) {
+      const packet = fixturePacket();
+      packet.primarySources = Array.from({ length: count }, (_, index) => fixtureEvidence(`batch-${index}`, 'Fixture Tradition A'));
+      packet.historicalContext = [];
+      const individual = client(packet);
+      const verifyCitationsBatch = vi.fn(async ({ citations }: { citations: CitationVerificationInput[] }) => ({
+        results: citations.map(({ passageId, corpusVersion }): CitationVerification => ({
+          passageId, sourceId: `source-${passageId}`, corpusVersion, verified: true, matchKind: 'exact_quote',
+          verificationPolicy: 'Synthetic test verification',
+        })),
+      }));
+      return { ...individual, verifyCitationsBatch };
+    }
+
+    it('makes sequential capped requests, passes the same signal and keeps results in order', async () => {
+      const context = batchContext(21);
+      const signal = new AbortController().signal;
+      const result = await new FeasonStudyClient({ context }).study({ question: 'Fixture sources' }, { signal });
+      expect(context.evidencePacket).toHaveBeenCalledOnce();
+      expect(context.verifyCitation).not.toHaveBeenCalled();
+      expect(context.verifyCitationsBatch.mock.calls.map(([input]) => input.citations.length)).toEqual([10, 10, 1]);
+      expect(context.verifyCitationsBatch).toHaveBeenCalledWith(expect.anything(), { signal });
+      expect(result.citations.map(({ evidence }) => evidence.passageId)).toEqual(
+        Array.from({ length: 21 }, (_, index) => `batch-${index}`),
+      );
+      expect(result.verification.allVerified).toBe(true);
+    });
+
+    it('falls back for the exact old-route response without retrying completed batches', async () => {
+      const context = batchContext(12);
+      context.verifyCitationsBatch.mockImplementationOnce(async ({ citations }) => ({
+        results: citations.map(({ passageId, corpusVersion }): CitationVerification => ({
+          passageId, sourceId: `source-${passageId}`, corpusVersion, verified: true, matchKind: 'exact_quote',
+          verificationPolicy: 'Synthetic fixture',
+        })),
+      }));
+      context.verifyCitationsBatch.mockRejectedValueOnce(new FeasonContextError(404, { error: 'Unknown context operation' }));
+      const result = await new FeasonStudyClient({ context }).study({ question: 'Fixture sources' });
+      expect(context.verifyCitationsBatch).toHaveBeenCalledTimes(2);
+      expect(context.verifyCitation.mock.calls.map(([input]) => input.passageId)).toEqual(['batch-10', 'batch-11']);
+      expect(result.verification.allVerified).toBe(true);
+    });
+
+    it.each([
+      [404, { error: 'Not found' }], [404, { error: 'Unknown context operation', upstream: true }],
+      [405, { error: 'Unknown context operation' }], [500, { error: 'Unavailable' }],
+    ])('does not fall back on HTTP %i or unexpected error bodies', async (status, payload) => {
+      const context = batchContext(2);
+      context.verifyCitationsBatch.mockRejectedValueOnce(new FeasonContextError(status, payload));
+      const result = await new FeasonStudyClient({ context }).study({ question: 'Fixture sources' });
+      expect(context.verifyCitation).not.toHaveBeenCalled();
+      expect(result.verification.counts.unavailable).toBe(2);
+    });
+
+    it.each([401, 403, 429])('stops on HTTP %i without batching further or falling back', async (status) => {
+      const context = batchContext(12);
+      context.verifyCitationsBatch.mockRejectedValueOnce(new FeasonContextError(status, {}));
+      await expect(new FeasonStudyClient({ context }).study({ question: 'Fixture sources' })).rejects.toMatchObject({ status });
+      expect(context.verifyCitationsBatch).toHaveBeenCalledOnce();
+      expect(context.verifyCitation).not.toHaveBeenCalled();
+    });
+
+    it('negotiates an old Feason host through real transport errors', async () => {
+      const paths: string[] = [];
+      const packet = fixturePacket();
+      const context = new FeasonContextClient({ token: 'synthetic', baseUrl: 'https://example.test', fetch: async (url, init) => {
+        const path = new URL(String(url)).pathname;
+        paths.push(path.split('/').at(-1)!);
+        if (path.endsWith('/evidence-packet')) return Response.json(packet);
+        if (path.endsWith('/verify-citations-batch')) {
+          return Response.json({ error: 'Unknown context operation' }, { status: 404 });
+        }
+        const { passageId, corpusVersion } = JSON.parse(String(init?.body)) as CitationVerificationInput;
+        return Response.json({
+          passageId, sourceId: `source-${passageId}`, corpusVersion, verified: true, matchKind: 'exact_quote',
+          verificationPolicy: 'Synthetic fixture',
+        });
+      } });
+      const result = await new FeasonStudyClient({ context }).study({ question: 'Fixture sources' });
+      expect(paths).toEqual(['evidence-packet', 'verify-citations-batch', 'verify-citation', 'verify-citation']);
+      expect(result.verification.allVerified).toBe(true);
+    });
+
+    it('propagates a caller timeout across retrieval, the current batch and remaining work', async () => {
+      const context = batchContext(12);
+      const signal = AbortSignal.timeout(50);
+      context.verifyCitationsBatch.mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+        signal.throwIfAborted();
+        throw new Error('Expected caller deadline');
+      });
+      await expect(new FeasonStudyClient({ context }).study({ question: 'Fixture sources' }, { signal }))
+        .rejects.toMatchObject({ name: 'TimeoutError' });
+      expect(context.evidencePacket).toHaveBeenCalledWith(expect.anything(), { signal });
+      expect(context.verifyCitationsBatch).toHaveBeenCalledWith(expect.anything(), { signal });
+      expect(context.verifyCitationsBatch).toHaveBeenCalledOnce();
+      expect(context.verifyCitation).not.toHaveBeenCalled();
+    });
+
+    it('honors an end-to-end abort before fallback or a later chunk starts', async () => {
+      const context = batchContext(12);
+      const controller = new AbortController();
+      context.verifyCitationsBatch.mockImplementationOnce(async () => {
+        controller.abort();
+        throw new FeasonContextError(404, { error: 'Unknown context operation' });
+      });
+      await expect(new FeasonStudyClient({ context }).study({ question: 'Fixture sources' }, {
+        signal: controller.signal,
+      })).rejects.toMatchObject({ name: 'AbortError' });
+      expect(context.verifyCitationsBatch).toHaveBeenCalledOnce();
+      expect(context.verifyCitation).not.toHaveBeenCalled();
+    });
   });
 
   it('keeps requested order, deduplicates labels, and distinguishes missing positions from missing sources', async () => {

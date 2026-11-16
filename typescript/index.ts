@@ -1,6 +1,9 @@
 import { CONTEXT_DEFAULT_BASE_URL, contextOperations, type ContextOperationName } from './generated.js';
 
+import { FeasonContextError, MAX_CITATION_VERIFICATION_BATCH } from './transport.js';
+
 export { CONTEXT_CONTRACT_VERSION, contextOperations } from './generated.js';
+export { FeasonContextError, MAX_CITATION_VERIFICATION_BATCH } from './transport.js';
 export { FeasonStudyClient } from './study.js';
 export type {
   FeasonStudyClientOptions, StudyContextClient, StudyInput, StudyResult, StudyCitation,
@@ -208,6 +211,16 @@ export interface ClaimProofArtifact {
   };
 }
 
+export interface CitationVerificationInput {
+  passageId: string;
+  quote?: string;
+  corpusVersion?: string;
+}
+
+export interface BatchCitationVerification {
+  results: CitationVerification[];
+}
+
 export class FeasonContextClient {
   private readonly baseUrl: string;
   private readonly request: typeof globalThis.fetch;
@@ -249,8 +262,24 @@ export class FeasonContextClient {
     return this.call<EvidencePacket>('evidencePacket', input, options);
   }
 
-  verifyCitation(input: { passageId: string; quote?: string; corpusVersion?: string }, options?: FeasonContextRequestOptions): Promise<CitationVerification> {
+  verifyCitation(input: CitationVerificationInput, options?: FeasonContextRequestOptions): Promise<CitationVerification> {
     return this.call<CitationVerification>('verifyCitation', input, options);
+  }
+
+  async verifyCitationsBatch(input: { citations: CitationVerificationInput[] }, options?: FeasonContextRequestOptions): Promise<BatchCitationVerification> {
+    const count = input.citations.length;
+    if (count < 1 || count > MAX_CITATION_VERIFICATION_BATCH) {
+      throw new TypeError('citations must contain between 1 and 10 items');
+    }
+    const payload = await this.call<BatchCitationVerification>('verifyCitationsBatch', input, options);
+    if (!Array.isArray(payload.results) || payload.results.length !== count || !payload.results.every((item, index) =>
+      item !== null && typeof item === 'object' && !Array.isArray(item)
+      && typeof item.verified === 'boolean' && item.passageId === input.citations[index]!.passageId
+      && ['passage_hash', 'exact_quote', 'normalized_quote', 'mismatch'].includes(item.matchKind)
+      && typeof item.verificationPolicy === 'string')) {
+      throw new FeasonContextError(200, { error: 'The server returned invalid citation batch results' });
+    }
+    return payload;
   }
 
   private async call<T>(operationName: ContextOperationName, body?: unknown, options?: FeasonContextRequestOptions): Promise<T> {
@@ -288,17 +317,5 @@ export class FeasonContextClient {
       clearTimeout(timer);
       options?.signal?.removeEventListener('abort', cancel);
     }
-  }
-}
-
-export class FeasonContextError extends Error {
-  readonly status: number;
-  readonly payload: unknown;
-
-  constructor(status: number, payload: unknown) {
-    super(`Feason Context request failed with HTTP ${status}`);
-    this.name = 'FeasonContextError';
-    this.status = status;
-    this.payload = payload;
   }
 }

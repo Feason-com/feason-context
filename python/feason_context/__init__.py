@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, Literal, NotRequired, TypedDict, cast
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -65,6 +65,12 @@ class EvidencePacket(TypedDict, total=False):
     confidence: float
 
 
+class CitationVerificationInput(TypedDict):
+    passageId: str
+    quote: NotRequired[str]
+    corpusVersion: NotRequired[str]
+
+
 class CitationVerification(TypedDict, total=False):
     verified: bool
     matchKind: Literal["passage_hash", "exact_quote", "normalized_quote", "mismatch"]
@@ -78,6 +84,10 @@ class CitationVerification(TypedDict, total=False):
     citation: str | dict[str, Any] | None
     reason: str
     verificationPolicy: str
+
+
+class BatchCitationVerification(TypedDict):
+    results: list[CitationVerification]
 
 
 class ContextPackage(TypedDict, total=False):
@@ -194,6 +204,22 @@ class FeasonContextClient:
             payload["corpusVersion"] = corpus_version
         return cast(CitationVerification, self._call("verifyCitation", payload))
 
+    def verify_citations_batch(self, citations: list[CitationVerificationInput]) -> BatchCitationVerification:
+        """Verify up to ten citations in input order; no retry or fallback."""
+        if not 1 <= len(citations) <= 10:
+            raise ValueError("citations must contain between 1 and 10 items")
+        payload = self._call("verifyCitationsBatch", {"citations": citations})
+        results = payload.get("results")
+        if not isinstance(results, list) or len(results) != len(citations) or not all(
+            isinstance(item, dict) and isinstance(item.get("verified"), bool)
+            and item.get("passageId") == citation["passageId"]
+            and item.get("matchKind") in ("passage_hash", "exact_quote", "normalized_quote", "mismatch")
+            and isinstance(item.get("verificationPolicy"), str)
+            for item, citation in zip(results, citations)
+        ):
+            raise FeasonContextError(200, {"error": "The server returned invalid citation batch results"})
+        return cast(BatchCitationVerification, payload)
+
     def _call(self, operation_name: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         operation = OPERATIONS[operation_name]
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
@@ -223,6 +249,6 @@ class FeasonContextClient:
 
 
 __all__ = [
-    "CitationVerification", "ClaimEvaluation", "ClaimProofArtifact", "ContextPackage", "CorpusManifest", "EvidenceItem", "EvidencePacket",
+    "BatchCitationVerification", "CitationVerification", "CitationVerificationInput", "ClaimEvaluation", "ClaimProofArtifact", "ContextPackage", "CorpusManifest", "EvidenceItem", "EvidencePacket",
     "FeasonContextClient", "FeasonContextError", "SearchMode", "SearchResponse",
 ]

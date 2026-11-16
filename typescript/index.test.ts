@@ -14,6 +14,52 @@ describe('Feason Context TypeScript SDK', () => {
     }));
   });
 
+  it('passes the ordered batch to the additive endpoint and preserves each result', async () => {
+    const payload = { citations: [{ passageId: 'fixture-a', quote: 'text a', corpusVersion: 'fixture-v1' }, { passageId: 'fixture-b' }] };
+    const results = [
+      { passageId: 'fixture-a', verified: true, matchKind: 'exact_quote', verificationPolicy: 'Synthetic' },
+      { passageId: 'fixture-b', verified: false, matchKind: 'mismatch', verificationPolicy: 'Synthetic' },
+    ];
+    const request = vi.fn(async () => Response.json({ results }));
+    const client = new FeasonContextClient({ token: 'token', baseUrl: 'https://example.test', fetch: request as typeof fetch });
+    await expect(client.verifyCitationsBatch(payload)).resolves.toEqual({ results });
+    expect(request).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledWith('https://example.test/api/context/v1/verify-citations-batch', expect.objectContaining({
+      method: 'POST', headers: expect.objectContaining({ authorization: 'Bearer token' }), body: JSON.stringify(payload),
+    }));
+  });
+
+  it('rejects empty and oversized batches locally and missing results after one request', async () => {
+    const request = vi.fn(async () => Response.json({ results: [] }));
+    const client = new FeasonContextClient({ token: 'token', fetch: request as typeof fetch });
+    await expect(client.verifyCitationsBatch({ citations: [] })).rejects.toThrow(TypeError);
+    await expect(client.verifyCitationsBatch({ citations: Array.from({ length: 11 }, () => ({ passageId: 'fixture' })) })).rejects.toThrow(TypeError);
+    expect(request).not.toHaveBeenCalled();
+    await expect(client.verifyCitationsBatch({ citations: [{ passageId: 'fixture' }] })).rejects.toMatchObject({ status: 200 });
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { verified: true, passageId: 'a', verificationPolicy: 'Synthetic' },
+    { verified: true, passageId: 'a', matchKind: 'exact_quote' },
+    { verified: true, passageId: 'a', matchKind: 'unexpected', verificationPolicy: 'Synthetic' },
+    { verified: true, passageId: 'a', matchKind: 'exact_quote', verificationPolicy: false },
+  ])('rejects an incomplete or invalid batch verification item: %j', async (item) => {
+    const client = new FeasonContextClient({ token: 'synthetic', fetch: async () => Response.json({ results: [item] }) });
+    await expect(client.verifyCitationsBatch({ citations: [{ passageId: 'a' }] }))
+      .rejects.toMatchObject({ status: 200 });
+  });
+
+  it('rejects results ordered differently from their requests', async () => {
+    const client = new FeasonContextClient({ token: 'synthetic', fetch: async () => Response.json({
+      results: ['b', 'a'].map((passageId) => ({
+        passageId, verified: true, matchKind: 'exact_quote', verificationPolicy: 'Synthetic',
+      })),
+    }) });
+    await expect(client.verifyCitationsBatch({ citations: [{ passageId: 'a' }, { passageId: 'b' }] }))
+      .rejects.toMatchObject({ status: 200 });
+  });
+
   it('throws a typed error without exposing or persisting a token', async () => {
     const client = new FeasonContextClient({ token: 'secret', fetch: async () => new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401, headers: { 'content-type': 'application/json' },

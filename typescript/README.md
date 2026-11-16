@@ -55,11 +55,19 @@ overlapping categories by passage ID and checks each exact returned quotation
 against that packet's corpus release. Conflicting copies or missing required
 attribution reject the workflow before verification.
 
-Checks use at most four simultaneous requests by default; configure
-`verificationConcurrency` between 1 and 8. With N unique passages, a study uses
-one retrieval request plus N verification requests. There are no automatic
-retries. Set `verifyCitations: false` for retrieval only; all citations are then
-explicitly `not_requested` and `allVerified` is false.
+With the current REST API, a study with multiple unique passages sends one
+retrieval request followed by sequential batches of up to ten citations.
+Each citation counts toward the same quota as a single verification. For
+N passages, batching reduces verification HTTP calls to ceil(N / 10).
+
+A custom client that supplies only the single verifier, or an older Feason
+server that explicitly replies that the batch operation is unknown, uses the
+single-citation path. That path runs at most four simultaneous requests by
+default; configure `verificationConcurrency` between 1 and 8. Other 404s,
+authentication failures and quota errors never trigger this fallback.
+There are no automatic retries. The caller signal covers the whole study.
+Set `verifyCitations: false` to retrieve only; all citations then have
+`not_requested` and `allVerified` is false.
 
 ## Compare traditions without filling coverage gaps
 
@@ -115,7 +123,7 @@ Cancellation propagates rather than becoming an unavailable citation. HTTP 401,
 requests settle first. Other individual verification failures are marked
 `unavailable`, without copying exception messages into the result. Retrieval
 failures reject the study. Per-request deadlines include reading the body;
-provide an overall `AbortSignal` to bound the complete workflow. A custom
+provide an overall signal such as `AbortSignal.timeout(60_000)` to bound retrieval, all batches, and any legacy fallback. A custom
 injected client or fetch implementation must honor the supplied signal.
 
 Matching a quotation does not establish doctrinal truth, scholarly review,
@@ -150,7 +158,11 @@ future integration must satisfy its API, content, AI, and commercial terms.
 ## Lower-level API
 
 `FeasonContextClient` continues to expose `manifest`, `contextualize`,
-`evaluateClaim`, `claimProof`, `search`, `evidencePacket`, and `verifyCitation`.
+`evaluateClaim`, `claimProof`, `search`, `evidencePacket`, `verifyCitation`,
+and `verifyCitationsBatch({ citations })`. The explicit batch method takes
+one to ten ordinary citation requests and returns `{ results }` in input
+order. It does not fall back on older hosts; `FeasonStudyClient` handles that
+for composed workflows.
 Each accepts an optional final `{ signal }` argument. HTTP errors and malformed successful responses use
 `FeasonContextError` with `status` and `payload`; non-JSON bodies and successful
 non-object payloads are replaced with a generic payload. A 2xx status on this

@@ -64,6 +64,69 @@ class ClientTest(unittest.TestCase):
             "claim": "The Son is fully divine", "limitPerStance": 4
         })
 
+    def test_verify_citations_batch_sends_ordered_items(self):
+        citations = [
+            {"passageId": "fixture-a", "quote": "Example", "corpusVersion": "fixture-v1"},
+            {"passageId": "fixture-b"},
+        ]
+        results = [
+            {"passageId": "fixture-a", "verified": True, "matchKind": "exact_quote", "verificationPolicy": "Synthetic"},
+            {"passageId": "fixture-b", "verified": False, "matchKind": "mismatch", "verificationPolicy": "Synthetic"},
+        ]
+        with patch("feason_context.urlopen", return_value=FakeResponse(json.dumps({"results": results}).encode())) as request:
+            client = FeasonContextClient("token", "https://example.test/")
+            self.assertEqual(client.verify_citations_batch(citations), {"results": results})
+            sent = request.call_args.args[0]
+            self.assertEqual(sent.full_url, "https://example.test/api/context/v1/verify-citations-batch")
+            self.assertEqual(sent.get_method(), "POST")
+            self.assertEqual(json.loads(sent.data), {"citations": citations})
+
+    def test_verify_citations_batch_checks_size_and_response_shape(self):
+        with patch("feason_context.urlopen", return_value=FakeResponse(b'{"results":[]}')) as request:
+            client = FeasonContextClient("token")
+            for citations in ([], [{"passageId": "fixture"}] * 11):
+                with self.assertRaises(ValueError):
+                    client.verify_citations_batch(citations)
+            request.assert_not_called()
+            with self.assertRaises(FeasonContextError) as raised:
+                client.verify_citations_batch([{"passageId": "fixture"}])
+            self.assertEqual(raised.exception.status, 200)
+            request.assert_called_once()
+
+    def test_verify_citations_batch_rejects_reordered_results(self):
+        body = json.dumps({"results": [
+            {"passageId": passage_id, "verified": True, "matchKind": "exact_quote", "verificationPolicy": "Synthetic"}
+            for passage_id in ("b", "a")
+        ]}).encode()
+        with patch("feason_context.urlopen", return_value=FakeResponse(body)):
+            with self.assertRaises(FeasonContextError) as raised:
+                FeasonContextClient("token").verify_citations_batch([{"passageId": "a"}, {"passageId": "b"}])
+            self.assertEqual(raised.exception.status, 200)
+
+    def test_verify_citations_batch_rejects_invalid_result_items(self):
+        for item in (
+            {"verificationPolicy": "Synthetic"},
+            {"matchKind": "exact_quote"},
+            {"matchKind": "unexpected", "verificationPolicy": "Synthetic"},
+            {"matchKind": "exact_quote", "verificationPolicy": False},
+        ):
+            with self.subTest(item=item):
+                result = {"passageId": "a", "verified": True, **item}
+                body = json.dumps({"results": [result]}).encode()
+                with patch("feason_context.urlopen", return_value=FakeResponse(body)):
+                    with self.assertRaises(FeasonContextError) as raised:
+                        FeasonContextClient("token").verify_citations_batch([{"passageId": "a"}])
+                    self.assertEqual(raised.exception.status, 200)
+
+    def test_verify_citations_batch_does_not_retry_old_route(self):
+        error = HTTPError("https://example.test", 404, "Not Found", {},
+                          io.BytesIO(b'{"error":"Unknown context operation"}'))
+        with patch("feason_context.urlopen", side_effect=error) as request:
+            with self.assertRaises(FeasonContextError) as raised:
+                FeasonContextClient("token").verify_citations_batch([{"passageId": "fixture"}])
+            self.assertEqual(raised.exception.status, 404)
+            request.assert_called_once()
+
     def test_http_errors_preserve_status_and_json_payload(self):
         payload = {"error": "Rate limited", "retryAfter": 60}
         error = HTTPError("https://example.test", 429, "Too many requests", {},

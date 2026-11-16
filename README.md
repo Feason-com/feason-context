@@ -14,8 +14,9 @@ Feason Context supplies source-grounded Christian research material with exact p
 - `DIRECTORY_LISTING.md` — reusable, boundary-aware MCP directory copy
 - `USE_CASES.md` — application recipes, operation selection, and response handling
 
-Both clients expose seven REST operations: `manifest`, `contextualize`, claim
-evaluation, claim proof, `search`, evidence packets, and citation verification.
+Both clients expose eight REST operations: `manifest`, `contextualize`, claim
+evaluation, claim proof, `search`, evidence packets, and single or batch
+citation verification.
 The TypeScript SDK also composes them through `FeasonStudyClient.study` and
 `compareTraditions`. These helpers preserve retrieved evidence and report
 verification failures and missing tradition coverage explicitly.
@@ -55,7 +56,7 @@ python3 -m unittest discover -s python -p 'test_*.py'
 
 ## Distribution
 
-This checkout tracks SDK source version `0.4.0` and the canonical seven-operation
+This checkout tracks SDK source version `0.4.0` and the canonical eight-operation
 client contract. The OpenAPI document also describes separate Signed Proof V2
 routes that these clients do not wrap. No package was published by this update,
 and registry availability has not been verified. Build or pack the source locally;
